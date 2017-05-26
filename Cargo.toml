@@ -1,9 +1,10 @@
 [package]
 name = "yahoo2fnu"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Cameron Steffen <cam.steffen94@gmail.com>"]
 
 [dependencies]
+chrono = "0.3"
 error-chain = "0.10.0"
 hyper = "0.10"
 serde_json = "1.0.2"
