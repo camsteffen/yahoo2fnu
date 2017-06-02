@@ -255,7 +255,7 @@ fn prompt_date(name: &str, default_str: &str, default: i64) -> i64 {
     prompt(&prompt_str, Some(default), |input| {
         let date = match NaiveDate::parse_from_str(input, "%m-%d-%Y") {
             Ok(date) => date,
-            Err(err) => return Err(format!("Invalid date: {}", err)),
+            Err(err) => bail!(format!("Invalid date: {}", err)),
         };
         Ok(date.and_hms(0, 0, 0).timestamp())
     })
@@ -265,13 +265,10 @@ fn prompt_file(symbol: &str) -> File {
     loop {
         let save_path = prompt_save_path(symbol);
         if save_path.exists() && !confirm_replace(&save_path) { continue }
-        return match File::create(&save_path) {
-            Ok(file) => file,
-            Err(err) => {
-                println!("Failed to create {}: {}", save_path.display(), err);
-                continue
-            },
-        };
+        match File::create(&save_path) {
+            Ok(file) => return file,
+            Err(err) => println!("Failed to create {}: {}", save_path.display(), err),
+        }
     }
 }
 
