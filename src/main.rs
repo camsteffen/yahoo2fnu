@@ -207,8 +207,8 @@ fn run() -> Result<()> {
     let start_date = prompt_date("Start Date", "min", 0);
     let end_date = prompt_date("End Date", "max", UTC::now().timestamp());
     let interval = Interval::prompt();
-    let mut file = prompt_file(&symbol);
     let client = Client::new();
+    let (mut file, fnu_path) = prompt_file(&symbol);
     let cookie_path = cookie_path();
     let cookie_data = get_cookie(&cookie_path, &client)?;
     let csv = fetch_csv(&client, &symbol, cookie_data, start_date, end_date, &interval).map_err(|err| {
@@ -217,7 +217,7 @@ fn run() -> Result<()> {
             Err(err2) => Error::with_chain(err, Error::from(err2)),
         }
     })?;
-    write_fnu(&mut file, &csv, &symbol, &data_value)
+    write_fnu(&mut file, &fnu_path, &csv, &symbol, &data_value)
 }
 
 fn prompt<T, F>(prompt: &str, default: Option<T>, f: F) -> T
@@ -261,12 +261,12 @@ fn prompt_date(name: &str, default_str: &str, default: i64) -> i64 {
     })
 }
 
-fn prompt_file(symbol: &str) -> File {
+fn prompt_file(symbol: &str) -> (File, PathBuf) {
     loop {
         let save_path = prompt_save_path(symbol);
         if save_path.exists() && !confirm_replace(&save_path) { continue }
         match File::create(&save_path) {
-            Ok(file) => return file,
+            Ok(file) => return (file, save_path),
             Err(err) => println!("Failed to create {}: {}", save_path.display(), err),
         }
     }
@@ -415,8 +415,8 @@ fn fetch_csv(client: &Client, symbol: &str, cookie_data: CookieData,
     Ok(buf)
 }
 
-fn write_fnu(file: &mut File, csv: &str, symbol: &str, data_value: &DataValue) -> Result<()> {
-    println!("Saving FNU file");
+fn write_fnu(file: &mut File, path: &Path, csv: &str, symbol: &str, data_value: &DataValue) -> Result<()> {
+    println!("Saving {}", path.display());
 
     writeln!(file, "{symbol}\n{name}",
              symbol = symbol,
@@ -425,7 +425,8 @@ fn write_fnu(file: &mut File, csv: &str, symbol: &str, data_value: &DataValue) -
     let mut lines = csv.lines();
     let column_headers = lines.next().ok_or("empty data")?;
     let col_name = data_value.col_name();
-    let col = column_headers.split(',').position(|s| s == col_name).ok_or("expected \"Close\"")?;
+    let col = column_headers.split(',').position(|s| s == col_name)
+        .ok_or_else(|| format!("\"{}\" column is missing", col_name))?;
     for line in lines {
         let mut parts = line.split(',');
         let date = parts.next().ok_or("not enough columns")?;
