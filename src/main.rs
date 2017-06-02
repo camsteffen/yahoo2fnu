@@ -1,18 +1,17 @@
 extern crate chrono;
 #[macro_use]
 extern crate error_chain;
-extern crate hyper;
+extern crate reqwest;
 extern crate serde_json;
 
-use std::result::Result as StdResult;
 use chrono::NaiveDate;
 use chrono::UTC;
-use hyper::Url;
-use hyper::Client;
-use hyper::client::Response;
-use hyper::header::Cookie;
-use hyper::header::SetCookie;
-use hyper::status::StatusCode;
+use reqwest::Client;
+use reqwest::Response;
+use reqwest::StatusCode;
+use reqwest::Url;
+use reqwest::header::Cookie;
+use reqwest::header::SetCookie;
 use std::env::temp_dir;
 use std::fs::File;
 use std::fs::remove_file;
@@ -23,6 +22,7 @@ use std::io::stdout;
 use std::io;
 use std::path::Path;
 use std::path::PathBuf;
+use std::result::Result as StdResult;
 
 mod errors {
     error_chain! {
@@ -38,7 +38,7 @@ mod errors {
 
         foreign_links {
             Io(::io::Error);
-            Network(::hyper::Error);
+            Network(::reqwest::Error);
         }
     }
 }
@@ -207,11 +207,10 @@ fn run() -> Result<()> {
     let start_date = prompt_date("Start Date", "min", 0);
     let end_date = prompt_date("End Date", "max", UTC::now().timestamp());
     let interval = Interval::prompt();
-    let client = Client::new();
     let (mut file, fnu_path) = prompt_file(&symbol);
     let cookie_path = cookie_path();
-    let cookie_data = get_cookie(&cookie_path, &client)?;
-    let csv = fetch_csv(&client, &symbol, cookie_data, start_date, end_date, &interval).map_err(|err| {
+    let cookie_data = get_cookie(&cookie_path)?;
+    let csv = fetch_csv(&symbol, cookie_data, start_date, end_date, &interval).map_err(|err| {
         match delete_cookie(&cookie_path) {
             Ok(()) => err,
             Err(err2) => Error::with_chain(err, Error::from(err2)),
@@ -302,12 +301,12 @@ fn cookie_path() -> PathBuf {
     path
 }
 
-fn get_cookie(path: &Path, client: &Client) -> Result<CookieData> {
+fn get_cookie(path: &Path) -> Result<CookieData> {
     let cached = path.exists();
     let cookie_data = if cached {
         get_cookie_from_file(path)?
     } else {
-        let cookie_data = get_cookie_from_web(client)?;
+        let cookie_data = get_cookie_from_web()?;
         save_cookie_file(path, &cookie_data)?;
         cookie_data
     };
@@ -338,12 +337,12 @@ fn get_cookie_from_file(path: &Path) -> Result<CookieData> {
     Ok(cookie_data)
 }
 
-fn get_cookie_from_web(client: &Client) -> Result<CookieData> {
+fn get_cookie_from_web() -> Result<CookieData> {
     println!("Fetching cookie");
 
     let url = "http://finance.yahoo.com/quote/^GSPC";
-    let mut res = client.get(url).send()?;
-    ensure!(res.status == hyper::Ok, ErrorKind::UnexpectedStatusCode(res.status));
+    let mut res = reqwest::get(url)?;
+    ensure!(res.status().is_success(), ErrorKind::UnexpectedStatusCode(*res.status()));
 
     let cookie = get_cookie_from_response(&res)?;
 
@@ -361,7 +360,7 @@ fn get_cookie_from_web(client: &Client) -> Result<CookieData> {
 }
 
 fn get_cookie_from_response(res: &Response) -> Result<String> {
-    let set_cookie = res.headers.get::<SetCookie>().ok_or("set-cookie header is missing")?;
+    let set_cookie = res.headers().get::<SetCookie>().ok_or("set-cookie header is missing")?;
     let part = set_cookie.iter().find(|s| s[..2] == *"B=").ok_or("failed to parse set-cookie header")?;
     let cookie_string = part.to_string();
     Ok(cookie_string)
@@ -388,7 +387,7 @@ fn save_cookie_file(path: &Path, cookie_data: &CookieData) -> Result<()> {
     Ok(())
 }
 
-fn fetch_csv(client: &Client, symbol: &str, cookie_data: CookieData,
+fn fetch_csv(symbol: &str, cookie_data: CookieData,
              start_date: i64, end_date: i64, interval: &Interval) -> Result<String> {
     println!("Fetching CSV");
 
@@ -404,11 +403,12 @@ fn fetch_csv(client: &Client, symbol: &str, cookie_data: CookieData,
     ];
     let url = &format!("http://query1.finance.yahoo.com/v7/finance/download/{}", symbol);
     let url = Url::parse_with_params(url, &params).chain_err(|| "failed to parse url")?;
+    let client = Client::new()?;
     let mut res = client.get(url)
         .header(Cookie(vec![cookie_data.cookie]))
         .send()?;
 
-    ensure!(res.status == hyper::Ok, ErrorKind::UnexpectedStatusCode(res.status));
+    ensure!(res.status().is_success(), ErrorKind::UnexpectedStatusCode(*res.status()));
 
     let mut buf = String::with_capacity(500000);
     res.read_to_string(&mut buf)?;
