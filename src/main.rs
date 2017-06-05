@@ -234,7 +234,7 @@ fn prompt<T, F>(prompt: &str, default: Option<T>, f: F) -> T
                 return val
             }
         } else {
-            match f(buf.trim_right()) {
+            match f(input) {
                 Ok(val) => return val,
                 Err(msg) => {
                     println!("{}", msg);
